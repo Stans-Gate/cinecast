@@ -1,9 +1,11 @@
 """
-CineCast - Bimanual Cinematic Gesture Control System
-====================================================
-Left Hand:  Selects effect mode (zoom, rotate, blur, filter)
-Right Hand: Controls effect intensity in real-time
-Single Hand Mode: Left hand controls both mode (gesture) and intensity (height)
+CineCast - Single-Hand Cinematic Gesture Control System
+========================================================
+One hand controls everything:
+1. Start in NO MODE (passthrough)
+2. Make a gesture → LOCKS into that mode
+3. Control intensity with palm open/close
+4. Middle finger up → QUIT back to NO MODE
 """
 
 import cv2
@@ -25,27 +27,22 @@ MIN_TRACKING_CONFIDENCE = 0.7
 MAX_NUM_HANDS = 2
 
 # Gesture detection
-PINCH_DISTANCE_THRESHOLD = 0.025  # Stricter threshold (2.5% of frame width)
-PINCH_DEPTH_THRESHOLD = 0.03      # Z-axis alignment requirement
-PINCH_DEBOUNCE_TIME = 1.0         # seconds
-GESTURE_STABILITY_FRAMES = 3      # Frames to confirm gesture change
+GESTURE_STABILITY_FRAMES = 8      # Frames to confirm gesture (hold for ~0.5s at 15fps)
+QUIT_GESTURE_FRAMES = 10          # Frames to confirm quit gesture (more stable)
 
 # Effect smoothing parameters
 INTENSITY_SMOOTHING = 0.15  # Lower = smoother (0-1)
 MODE_TRANSITION_SPEED = 0.2  # Crossfade speed between effects
 
-# Single-hand mode
-SINGLE_HAND_MODE_TIMEOUT = 1.5  # Switch to single-hand after 1.5s with one hand
-
 # Effect modes
-MODE_NORMAL = 0
+MODE_NONE = -1        # No mode active (passthrough)
 MODE_ZOOM = 1
 MODE_ROTATE = 2
 MODE_BLUR = 3
 MODE_FILTER = 4
 
 MODE_NAMES = {
-    MODE_NORMAL: "Normal",
+    MODE_NONE: "No Mode (Passthrough)",
     MODE_ZOOM: "Dolly Zoom",
     MODE_ROTATE: "Rotate",
     MODE_BLUR: "Motion Blur",
@@ -54,7 +51,7 @@ MODE_NAMES = {
 
 # Gesture names for better UI
 GESTURE_ICONS = {
-    MODE_NORMAL: "✋",
+    MODE_NONE: "🎬",
     MODE_ZOOM: "👍",      # Thumb up
     MODE_ROTATE: "✌️",     # Peace sign
     MODE_BLUR: "🤘",      # Rock sign
@@ -69,24 +66,18 @@ GESTURE_ICONS = {
 # Video capture
 cap = cv2.VideoCapture(CAMERA_INDEX)
 
-# Pause state
-paused = False
-paused_frame = None
-last_pinch_toggle = 0
-
-# Bimanual control state
-current_mode = MODE_NORMAL
-current_intensity = 0.5  # 0.0 to 1.0
+# Single-hand control state
+mode_locked = False       # Is a mode currently locked?
+current_mode = MODE_NONE  # Current active mode
+current_intensity = 0.5   # 0.0 to 1.0
 smoothed_intensity = 0.5
-previous_mode = MODE_NORMAL
-mode_blend_factor = 1.0  # For smooth mode transitions
+previous_mode = MODE_NONE
+mode_blend_factor = 1.0   # For smooth mode transitions
 
-# Hand tracking state
-left_hand_detected = False
-right_hand_detected = False
-last_two_hands_time = 0
-single_hand_mode = False
-gesture_buffer = deque(maxlen=GESTURE_STABILITY_FRAMES)  # For gesture debouncing
+# Gesture tracking
+hand_detected = False
+gesture_buffer = deque(maxlen=GESTURE_STABILITY_FRAMES)  # For mode lock gestures
+quit_buffer = deque(maxlen=QUIT_GESTURE_FRAMES)           # For quit gesture
 
 # Recording state
 recording = False
@@ -111,72 +102,47 @@ mp_draw = mp.solutions.drawing_utils
 # HAND DETECTION & GESTURE CLASSIFICATION
 # ============================================================================
 
-def is_pinch(landmarks, w, h):
+def get_palm_openness(landmarks):
     """
-    Improved pinch detection with stricter requirements
-    Requires thumb and index to be very close in 3D space
+    Calculate palm openness based on finger curl
+    Closed fist (all fingers curled) = 0.0
+    Open palm (all fingers extended) = 1.0
     """
-    thumb = landmarks[mp_hands.HandLandmark.THUMB_TIP]
-    index = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-    middle = landmarks[mp_hands.HandLandmark.MIDDLE_FINGER_TIP]
+    # Count how many fingers are extended
+    count, extended = count_extended_fingers(landmarks)
 
-    # 2D distance (in screen space)
-    dx = (thumb.x - index.x) * w
-    dy = (thumb.y - index.y) * h
-    dist_2d = (dx**2 + dy**2) ** 0.5
+    # Calculate openness as ratio of extended fingers
+    # 0 fingers = 0%, 5 fingers = 100%
+    openness = count / 5.0
 
-    # Z-axis depth alignment
-    dz = abs(thumb.z - index.z)
+    # Add some granularity by checking finger curl angles
+    finger_tips = [8, 12, 16, 20]  # index, middle, ring, pinky
+    finger_mcp = [5, 9, 13, 17]    # knuckles
 
-    # Additional check: middle finger should be far from pinch point
-    middle_dist = ((middle.x - thumb.x)**2 + (middle.y - thumb.y)**2) ** 0.5
+    curl_distances = []
+    for tip, mcp in zip(finger_tips, finger_mcp):
+        tip_pos = landmarks[tip]
+        mcp_pos = landmarks[mcp]
+        # Distance from tip to knuckle (smaller = more curled)
+        dist = ((tip_pos.x - mcp_pos.x)**2 + (tip_pos.y - mcp_pos.y)**2) ** 0.5
+        curl_distances.append(dist)
 
-    # Stricter criteria
-    is_pinching = (
-        dist_2d < PINCH_DISTANCE_THRESHOLD * w and  # Very close in 2D
-        dz < PINCH_DEPTH_THRESHOLD and              # Aligned in depth
-        middle_dist > 0.05                           # Other fingers not involved
-    )
+    avg_curl = np.mean(curl_distances)
 
-    return is_pinching
+    # Normalize curl distance (empirical values)
+    # Closed fist: ~0.05, Open palm: ~0.15
+    curl_intensity = (avg_curl - 0.05) / (0.15 - 0.05)
+    curl_intensity = np.clip(curl_intensity, 0.0, 1.0)
 
+    # Blend both metrics (60% curl, 40% finger count)
+    final_openness = 0.6 * curl_intensity + 0.4 * openness
 
-def get_hand_openness(landmarks):
-    """
-    Calculate how open the hand is (0.0 = closed fist, 1.0 = wide open)
-    Used for intensity control with right hand
-    """
-    # Calculate average distance of fingertips from palm center
-    palm_center = landmarks[mp_hands.HandLandmark.WRIST]
-    fingertips = [
-        landmarks[mp_hands.HandLandmark.THUMB_TIP],
-        landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP],
-        landmarks[mp_hands.HandLandmark.MIDDLE_FINGER_TIP],
-        landmarks[mp_hands.HandLandmark.RING_FINGER_TIP],
-        landmarks[mp_hands.HandLandmark.PINKY_TIP]
-    ]
-
-    total_dist = 0
-    for tip in fingertips:
-        dx = tip.x - palm_center.x
-        dy = tip.y - palm_center.y
-        dz = tip.z - palm_center.z
-        dist = (dx**2 + dy**2 + dz**2) ** 0.5
-        total_dist += dist
-
-    avg_dist = total_dist / len(fingertips)
-
-    # Normalize to 0-1 range (empirically determined bounds)
-    min_dist = 0.1  # closed fist
-    max_dist = 0.4  # wide open hand
-
-    intensity = (avg_dist - min_dist) / (max_dist - min_dist)
-    return np.clip(intensity, 0.0, 1.0)
+    return np.clip(final_openness, 0.0, 1.0)
 
 
 def count_extended_fingers(landmarks):
     """
-    Count how many fingers are extended
+    Count how many fingers are extended (more robust detection)
     Returns tuple: (count, [thumb, index, middle, ring, pinky])
     """
     fingers_extended = [False] * 5
@@ -184,93 +150,91 @@ def count_extended_fingers(landmarks):
     # Thumb: check if tip is far from palm in x-direction
     thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
     thumb_ip = landmarks[mp_hands.HandLandmark.THUMB_IP]
+    thumb_mcp = landmarks[mp_hands.HandLandmark.THUMB_MCP]
     wrist = landmarks[mp_hands.HandLandmark.WRIST]
 
     # Thumb extended if tip is further from wrist than IP joint
-    thumb_dist = abs(thumb_tip.x - wrist.x)
+    thumb_tip_dist = abs(thumb_tip.x - wrist.x)
     thumb_ip_dist = abs(thumb_ip.x - wrist.x)
-    fingers_extended[0] = thumb_dist > thumb_ip_dist * 1.2
+    fingers_extended[0] = thumb_tip_dist > thumb_ip_dist * 1.3
 
-    # Other fingers: tip above PIP joint
+    # Other fingers: tip above PIP joint with better threshold
     finger_tips = [8, 12, 16, 20]
     finger_pips = [6, 10, 14, 18]
+    finger_mcps = [5, 9, 13, 17]
 
-    for i, (tip, pip) in enumerate(zip(finger_tips, finger_pips)):
-        fingers_extended[i + 1] = landmarks[tip].y < landmarks[pip].y
+    for i, (tip, pip, mcp) in enumerate(zip(finger_tips, finger_pips, finger_mcps)):
+        # Check if tip is significantly above the PIP joint
+        tip_y = landmarks[tip].y
+        pip_y = landmarks[pip].y
+        mcp_y = landmarks[mcp].y
+
+        # Finger is extended if tip is above PIP and the angle looks right
+        is_extended = (tip_y < pip_y - 0.02) and (tip_y < mcp_y)
+        fingers_extended[i + 1] = is_extended
 
     return sum(fingers_extended), fingers_extended
 
 
-def classify_mode_gesture(landmarks):
+def is_quit_gesture(landmarks):
     """
-    Improved gesture classification with distinct patterns
-
-    Gestures (designed to be very different):
-    - THUMB UP (only thumb extended): Zoom
-    - PEACE SIGN (index + middle only): Rotate
-    - ROCK SIGN (index + pinky only): Blur
-    - OK SIGN (thumb + index touching, others up): Filter
-    - OPEN PALM (all fingers): Normal
+    Detect QUIT gesture: Middle finger up only (very distinct)
+    This should be hard to trigger accidentally
     """
     count, extended = count_extended_fingers(landmarks)
 
-    # Check for OK sign first (thumb and index touching)
+    # Middle finger up ONLY (index 2)
+    # All other fingers must be down
+    if extended[2] and not extended[0] and not extended[1] and not extended[3] and not extended[4]:
+        if count == 1:
+            return True
+
+    return False
+
+
+def classify_mode_gesture(landmarks):
+    """
+    Classify gesture to lock into a mode
+    Only used when NOT in a locked mode
+
+    Gestures (designed to be very different):
+    - THUMB UP (only thumb extended): Zoom
+    - PEACE SIGN (index + middle): Rotate
+    - ROCK SIGN (index + pinky): Blur
+    - OK SIGN (thumb + index touching, others up): Filter
+    """
+    count, extended = count_extended_fingers(landmarks)
+
+    # Get thumb and index positions for OK sign check
     thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
     index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
     ok_dist = ((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2) ** 0.5
 
-    if ok_dist < 0.05 and extended[2] and extended[3] and extended[4]:  # OK sign
-        return MODE_FILTER
+    # OK SIGN: thumb touches index, other 3 fingers up (relaxed requirement)
+    if ok_dist < 0.06 and (extended[2] or extended[3] or extended[4]):
+        # At least 2 of the 3 other fingers should be up
+        others_up = sum([extended[2], extended[3], extended[4]])
+        if others_up >= 2:
+            return MODE_FILTER
 
-    # Thumb up (only thumb extended)
-    if extended[0] and not extended[1] and not extended[2] and not extended[3] and not extended[4]:
+    # THUMBS UP: only thumb extended, all others clearly down
+    if extended[0] and count == 1:
         return MODE_ZOOM
 
-    # Peace sign (index + middle only)
-    if not extended[0] and extended[1] and extended[2] and not extended[3] and not extended[4]:
-        return MODE_ROTATE
+    # PEACE SIGN: index + middle up, thumb/ring/pinky down
+    if extended[1] and extended[2] and not extended[3] and not extended[4]:
+        if count == 2 or (count == 3 and extended[0]):  # Allow thumb to be up too
+            return MODE_ROTATE
 
-    # Rock sign (index + pinky only)
-    if not extended[0] and extended[1] and not extended[2] and not extended[3] and extended[4]:
-        return MODE_BLUR
+    # ROCK SIGN: index + pinky up, middle/ring down
+    if extended[1] and extended[4] and not extended[2] and not extended[3]:
+        if count == 2 or (count == 3 and extended[0]):  # Allow thumb to be up too
+            return MODE_BLUR
 
-    # Open palm (4-5 fingers extended) -> Normal
-    if count >= 4:
-        return MODE_NORMAL
-
-    # Default to current mode if gesture unclear (prevents flickering)
-    return None  # Will be handled by caller
+    # Ambiguous gesture - return None
+    return None
 
 
-def get_hand_height_normalized(landmarks):
-    """
-    Get vertical position of hand (0.0 = bottom, 1.0 = top)
-    Used for single-hand intensity control
-    """
-    wrist = landmarks[mp_hands.HandLandmark.WRIST]
-    # Invert Y (0 is top in image coords, we want 0 at bottom)
-    height = 1.0 - wrist.y
-    return np.clip(height, 0.0, 1.0)
-
-
-def identify_left_right_hands(multi_hand_landmarks, multi_handedness):
-    """
-    Identify which detected hand is left vs right
-    Returns: (left_hand_landmarks, right_hand_landmarks)
-    """
-    left_hand = None
-    right_hand = None
-
-    for hand_landmarks, handedness in zip(multi_hand_landmarks, multi_handedness):
-        # MediaPipe returns handedness from camera perspective (mirrored)
-        label = handedness.classification[0].label
-
-        if label == "Left":  # Actually right hand (mirrored)
-            right_hand = hand_landmarks
-        else:  # Actually left hand (mirrored)
-            left_hand = hand_landmarks
-
-    return left_hand, right_hand
 
 
 # ============================================================================
@@ -358,8 +322,8 @@ def apply_effect(frame, mode, intensity, t):
     """
     Main effect dispatcher with smooth blending
     """
-    if mode == MODE_NORMAL:
-        return frame
+    if mode == MODE_NONE:
+        return frame  # Passthrough
     elif mode == MODE_ZOOM:
         return apply_zoom_effect(frame, intensity, t)
     elif mode == MODE_ROTATE:
@@ -376,74 +340,70 @@ def apply_effect(frame, mode, intensity, t):
 # UI RENDERING
 # ============================================================================
 
-def draw_ui(frame, mode, intensity, fps, recording_status, left_detected, right_detected, single_mode):
+def draw_ui(frame, mode, intensity, fps, recording_status, hand_detected, locked):
     """
     Draw comprehensive UI overlay
-    Shows: mode, intensity, hand status, FPS, recording indicator, gesture hints
+    Shows: mode, lock status, intensity, hand detection, FPS, recording
     """
     h, w = frame.shape[:2]
 
-    # Semi-transparent overlay panel (extended height for hand indicators)
+    # Semi-transparent overlay panel
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (w, 150), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
 
-    # Mode display with gesture icon
+    # Mode display with lock status
     mode_name = MODE_NAMES.get(mode, "Unknown")
     gesture_icon = GESTURE_ICONS.get(mode, "❓")
-    cv2.putText(frame, f"{gesture_icon} MODE: {mode_name}", (20, 40),
-                cv2.FONT_HERSHEY_DUPLEX, 1.0, (100, 255, 100), 2)
 
-    # Intensity bar
-    bar_x = 20
-    bar_y = 60
-    bar_width = 300
-    bar_height = 20
-
-    # Background bar
-    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height),
-                  (60, 60, 60), -1)
-
-    # Intensity fill with gradient effect
-    fill_width = int(bar_width * intensity)
-    color_intensity = (
-        int(100 + 155 * intensity),
-        int(255 - 100 * intensity),
-        100
-    )
-    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_width, bar_y + bar_height),
-                  color_intensity, -1)
-
-    # Intensity percentage
-    cv2.putText(frame, f"Intensity: {int(intensity * 100)}%", (bar_x + bar_width + 20, bar_y + 16),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-    # Hand detection status indicators
-    hand_status_y = 95
-    hand_status_x = 20
-
-    # Control mode indicator
-    if single_mode:
-        cv2.putText(frame, "SINGLE HAND MODE", (hand_status_x, hand_status_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 100), 2)
-        cv2.putText(frame, "(Gesture = Mode, Height = Intensity)", (hand_status_x, hand_status_y + 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
+    if locked:
+        lock_icon = "🔒"
+        mode_color = (100, 255, 255)  # Cyan when locked
+        status_text = "LOCKED"
     else:
-        # Left hand indicator
-        left_color = (100, 255, 100) if left_detected else (80, 80, 80)
-        left_status = "✓" if left_detected else "✗"
-        cv2.putText(frame, f"L {left_status}", (hand_status_x, hand_status_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, left_color, 2)
+        lock_icon = "🔓"
+        mode_color = (100, 255, 100)  # Green when unlocked
+        status_text = "UNLOCKED"
 
-        # Right hand indicator
-        right_color = (100, 255, 100) if right_detected else (80, 80, 80)
-        right_status = "✓" if right_detected else "✗"
-        cv2.putText(frame, f"R {right_status}", (hand_status_x + 60, hand_status_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, right_color, 2)
+    cv2.putText(frame, f"{lock_icon} {gesture_icon} {mode_name}", (20, 40),
+                cv2.FONT_HERSHEY_DUPLEX, 1.0, mode_color, 2)
 
-        # Labels
-        cv2.putText(frame, "L: Mode | R: Intensity", (hand_status_x + 120, hand_status_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+    # Status indicator
+    cv2.putText(frame, status_text, (20, 70),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, mode_color, 2)
+
+    # Intensity bar (only show when locked in a mode)
+    if locked and mode != MODE_NONE:
+        bar_x = 20
+        bar_y = 90
+        bar_width = 300
+        bar_height = 20
+
+        # Background bar
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height),
+                      (60, 60, 60), -1)
+
+        # Intensity fill
+        fill_width = int(bar_width * intensity)
+        color_intensity = (
+            int(100 + 155 * intensity),
+            int(255 - 100 * intensity),
+            100
+        )
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_width, bar_y + bar_height),
+                      color_intensity, -1)
+
+        # Intensity percentage
+        cv2.putText(frame, f"Intensity: {int(intensity * 100)}%", (bar_x + bar_width + 20, bar_y + 16),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    # Hand detection indicator
+    hand_status_y = 125
+    hand_color = (100, 255, 100) if hand_detected else (80, 80, 80)
+    hand_icon = "👋" if hand_detected else "🚫"
+    cv2.putText(frame, f"{hand_icon} Hand: {'Detected' if hand_detected else 'Not Detected'}",
+                (20, hand_status_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, hand_color, 2)
 
     # FPS counter
     cv2.putText(frame, f"FPS: {fps:.1f}", (w - 120, 30),
@@ -455,22 +415,22 @@ def draw_ui(frame, mode, intensity, fps, recording_status, left_detected, right_
         cv2.putText(frame, "REC", (w - 100, 70),
                     cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 0, 255), 2)
 
-    # Gesture guide in bottom-left corner
-    draw_gesture_guide(frame, h, w)
+    # Gesture guide in bottom-right corner
+    draw_gesture_guide(frame, h, w, locked)
 
     # Controls hint at bottom
-    cv2.putText(frame, "Controls: [R] Record | [Q] Quit | [H] Toggle Hints",
+    cv2.putText(frame, "Controls: [R] Record | [Q] Quit",
                 (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
 
     return frame
 
 
-def draw_gesture_guide(frame, h, w):
+def draw_gesture_guide(frame, h, w, locked):
     """Draw a small gesture reference guide"""
-    guide_x = w - 250
-    guide_y = h - 160
-    guide_w = 230
-    guide_h = 135
+    guide_x = w - 280
+    guide_y = h - 185
+    guide_w = 260
+    guide_h = 165
 
     # Semi-transparent background
     overlay = frame.copy()
@@ -482,41 +442,30 @@ def draw_gesture_guide(frame, h, w):
     cv2.putText(frame, "Gesture Guide:", (guide_x + 5, guide_y + 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
 
-    # Gestures list
-    gestures = [
-        "👍 Thumbs Up = Zoom",
-        "✌️  Peace = Rotate",
-        "🤘 Rock = Blur",
-        "👌 OK = Filter",
-        "✋ Open = Normal"
-    ]
+    if locked:
+        # Show quit instruction when locked
+        instructions = [
+            "🔒 MODE LOCKED",
+            "",
+            "Close/Open palm = Intensity",
+            "",
+            "🖕 Middle Finger Up = QUIT"
+        ]
+    else:
+        # Show available modes when unlocked
+        instructions = [
+            "Make gesture to LOCK mode:",
+            "👍 Thumbs Up = Zoom",
+            "✌️  Peace = Rotate",
+            "🤘 Rock = Blur",
+            "👌 OK = Filter"
+        ]
 
     y_offset = guide_y + 45
-    for gesture in gestures:
-        cv2.putText(frame, gesture, (guide_x + 10, y_offset),
+    for instruction in instructions:
+        cv2.putText(frame, instruction, (guide_x + 10, y_offset),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1)
-        y_offset += 18
-
-
-def draw_paused_overlay(frame):
-    """Draw paused state overlay"""
-    h, w = frame.shape[:2]
-    overlay = frame.copy()
-
-    # Dark semi-transparent overlay
-    cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
-    frame = cv2.addWeighted(overlay, 0.4, frame, 0.6, 0)
-
-    # PAUSED text
-    text = "PAUSED"
-    font = cv2.FONT_HERSHEY_DUPLEX
-    text_size = cv2.getTextSize(text, font, 2.5, 4)[0]
-    text_x = (w - text_size[0]) // 2
-    text_y = (h + text_size[1]) // 2
-
-    cv2.putText(frame, text, (text_x, text_y), font, 2.5, (0, 100, 255), 4)
-
-    return frame
+        y_offset += 22
 
 
 # ============================================================================
@@ -554,33 +503,35 @@ def stop_recording():
 # ============================================================================
 
 def main():
-    global paused, paused_frame, last_pinch_toggle
     global current_mode, current_intensity, smoothed_intensity
     global previous_mode, mode_blend_factor
     global last_frame_time, recording
-    global left_hand_detected, right_hand_detected, last_two_hands_time, single_hand_mode
-    global gesture_buffer
+    global hand_detected, mode_locked
+    global gesture_buffer, quit_buffer
 
-    print("\n" + "="*65)
-    print("  CINECAST - Bimanual Cinematic Gesture Control")
-    print("="*65)
-    print("\nGESTURES (Much More Distinct!):")
-    print("  👍 THUMBS UP:     Dolly Zoom")
-    print("  ✌️  PEACE SIGN:    Rotate")
-    print("  🤘 ROCK SIGN:     Motion Blur")
-    print("  👌 OK SIGN:       Color Grade")
-    print("  ✋ OPEN PALM:     Normal/Reset")
-    print("\nTWO-HAND MODE:")
-    print("  Left Hand:  Gesture selects mode")
-    print("  Right Hand: Openness controls intensity (0-100%)")
-    print("\nSINGLE-HAND MODE (auto-activates after 1.5s):")
-    print("  Gesture:    Selects mode")
-    print("  Height:     Controls intensity (raise = more intense)")
-    print("\nCONTROLS:")
+    print("\n" + "="*70)
+    print("  CINECAST - Single-Hand Cinematic Gesture Control")
+    print("="*70)
+    print("\n🎬 HOW IT WORKS:")
+    print("  1. Start in NO MODE (camera passthrough)")
+    print("  2. Make a gesture → LOCKS into that mode")
+    print("  3. Control intensity by opening/closing palm")
+    print("  4. Middle finger up → QUIT to NO MODE")
+    print("\n🔓 GESTURES TO LOCK A MODE (hold for 0.5s):")
+    print("  👍 THUMBS UP:        Dolly Zoom")
+    print("  ✌️  PEACE SIGN:       Rotate")
+    print("  🤘 ROCK SIGN:        Motion Blur")
+    print("  👌 OK SIGN:          Color Grade")
+    print("\n🔒 WHEN LOCKED:")
+    print("  • Fist closed = 0% intensity")
+    print("  • Palm open = 100% intensity")
+    print("  • Other gestures are IGNORED (no accidental switching!)")
+    print("\n🖕 QUIT GESTURE:")
+    print("  • Middle finger up ONLY → unlocks and returns to NO MODE")
+    print("\n⌨️  KEYBOARD CONTROLS:")
     print("  [R] Start/Stop Recording")
-    print("  [Q] Quit")
-    print("  Pinch: Pause/Resume (stricter detection)")
-    print("="*65 + "\n")
+    print("  [Q] Quit Application")
+    print("="*70 + "\n")
 
     while True:
         ret, frame = cap.read()
@@ -601,119 +552,68 @@ def main():
         results = hands.process(rgb)
 
         # Update hand detection state
-        left_hand_detected = False
-        right_hand_detected = False
+        hand_detected = False
 
-        # Process hands for bimanual control
-        if results.multi_hand_landmarks and results.multi_handedness:
-            left_hand, right_hand = identify_left_right_hands(
-                results.multi_hand_landmarks,
-                results.multi_handedness
-            )
-
-            left_hand_detected = left_hand is not None
-            right_hand_detected = right_hand is not None
-
-            # Track when we last had two hands
-            if left_hand_detected and right_hand_detected:
-                last_two_hands_time = current_time
-                single_hand_mode = False
-            # Switch to single-hand mode after timeout
-            elif (left_hand_detected or right_hand_detected):
-                if current_time - last_two_hands_time > SINGLE_HAND_MODE_TIMEOUT:
-                    if not single_hand_mode:
-                        single_hand_mode = True
-                        print("[MODE] Switched to SINGLE-HAND mode")
+        # SINGLE-HAND LOCK/UNLOCK SYSTEM
+        if results.multi_hand_landmarks:
+            # Use first detected hand (supports any hand)
+            active_hand = results.multi_hand_landmarks[0]
+            hand_detected = True
 
             # Draw hand landmarks
-            for hand_landmarks in results.multi_hand_landmarks:
-                mp_draw.draw_landmarks(
-                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
-                    mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
-                    mp_draw.DrawingSpec(color=(255, 255, 255), thickness=2)
-                )
+            mp_draw.draw_landmarks(
+                frame, active_hand, mp_hands.HAND_CONNECTIONS,
+                mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                mp_draw.DrawingSpec(color=(255, 255, 255), thickness=2)
+            )
 
-            # SINGLE-HAND MODE: Use one hand for both gesture and intensity
-            if single_hand_mode:
-                active_hand = left_hand if left_hand is not None else right_hand
+            # Check for QUIT gesture (middle finger up)
+            if is_quit_gesture(active_hand.landmark):
+                quit_buffer.append(True)
 
-                if active_hand is not None:
-                    # Check for pinch first
-                    if is_pinch(active_hand.landmark, w, h):
-                        now = time.time()
-                        if now - last_pinch_toggle > PINCH_DEBOUNCE_TIME:
-                            paused = not paused
-                            if paused:
-                                paused_frame = frame.copy()
-                            last_pinch_toggle = now
-                            print(f"[PAUSE] {'ON' if paused else 'OFF'}")
-                    else:
-                        # Gesture determines mode
-                        detected_gesture = classify_mode_gesture(active_hand.landmark)
-
-                        if detected_gesture is not None:
-                            gesture_buffer.append(detected_gesture)
-
-                            # Only change mode if gesture is stable
-                            if len(gesture_buffer) == GESTURE_STABILITY_FRAMES:
-                                if all(g == detected_gesture for g in gesture_buffer):
-                                    if detected_gesture != current_mode:
-                                        previous_mode = current_mode
-                                        current_mode = detected_gesture
-                                        mode_blend_factor = 0.0
-                                        print(f"[MODE] {MODE_NAMES[current_mode]}")
-
-                        # Hand height determines intensity
-                        height_intensity = get_hand_height_normalized(active_hand.landmark)
-                        current_intensity = height_intensity
-
-            # TWO-HAND MODE: Left = gesture, Right = intensity
+                # If quit gesture is stable, unlock mode
+                if len(quit_buffer) == QUIT_GESTURE_FRAMES:
+                    if all(quit_buffer):  # All frames must be quit gesture
+                        if mode_locked:
+                            mode_locked = False
+                            current_mode = MODE_NONE
+                            gesture_buffer.clear()
+                            print("[UNLOCK] Returned to NO MODE")
             else:
-                # Left hand: Mode selection
-                if left_hand is not None:
-                    # Check for pinch to pause
-                    if is_pinch(left_hand.landmark, w, h):
-                        now = time.time()
-                        if now - last_pinch_toggle > PINCH_DEBOUNCE_TIME:
-                            paused = not paused
-                            if paused:
-                                paused_frame = frame.copy()
-                            last_pinch_toggle = now
-                            print(f"[PAUSE] {'ON' if paused else 'OFF'}")
-                    else:
-                        detected_gesture = classify_mode_gesture(left_hand.landmark)
+                quit_buffer.append(False)
 
-                        if detected_gesture is not None:
-                            gesture_buffer.append(detected_gesture)
+            # MODE LOCKED: Only control intensity
+            if mode_locked:
+                # Intensity control with palm openness
+                raw_intensity = get_palm_openness(active_hand.landmark)
+                current_intensity = raw_intensity
 
-                            # Only change mode if gesture is stable
-                            if len(gesture_buffer) == GESTURE_STABILITY_FRAMES:
-                                if all(g == detected_gesture for g in gesture_buffer):
-                                    if detected_gesture != current_mode:
-                                        previous_mode = current_mode
-                                        current_mode = detected_gesture
-                                        mode_blend_factor = 0.0
-                                        print(f"[MODE] {MODE_NAMES[current_mode]}")
+            # MODE UNLOCKED: Look for gesture to lock a mode
+            else:
+                detected_gesture = classify_mode_gesture(active_hand.landmark)
 
-                # Right hand: Intensity control
-                if right_hand is not None:
-                    # Check for pinch to pause
-                    if is_pinch(right_hand.landmark, w, h):
-                        now = time.time()
-                        if now - last_pinch_toggle > PINCH_DEBOUNCE_TIME:
-                            paused = not paused
-                            if paused:
-                                paused_frame = frame.copy()
-                            last_pinch_toggle = now
-                            print(f"[PAUSE] {'ON' if paused else 'OFF'}")
-                    else:
-                        raw_intensity = get_hand_openness(right_hand.landmark)
-                        current_intensity = raw_intensity
+                if detected_gesture is not None:
+                    gesture_buffer.append(detected_gesture)
+
+                    # Only lock mode if gesture is stable
+                    if len(gesture_buffer) == GESTURE_STABILITY_FRAMES:
+                        if all(g == detected_gesture for g in gesture_buffer):
+                            # Lock into this mode
+                            mode_locked = True
+                            previous_mode = current_mode
+                            current_mode = detected_gesture
+                            mode_blend_factor = 0.0
+                            gesture_buffer.clear()
+                            quit_buffer.clear()
+                            print(f"[LOCK] Mode locked: {MODE_NAMES[current_mode]}")
+                else:
+                    # Clear buffer if gesture is ambiguous
+                    gesture_buffer.clear()
         else:
-            # No hands detected - reset to two-hand mode after delay
-            if single_hand_mode and current_time - last_two_hands_time > 3.0:
-                single_hand_mode = False
-                gesture_buffer.clear()
+            # No hand detected
+            hand_detected = False
+            gesture_buffer.clear()
+            quit_buffer.clear()
 
         # Smooth intensity transitions
         smoothed_intensity += (current_intensity - smoothed_intensity) * INTENSITY_SMOOTHING
@@ -722,23 +622,19 @@ def main():
         if mode_blend_factor < 1.0:
             mode_blend_factor = min(1.0, mode_blend_factor + MODE_TRANSITION_SPEED)
 
-        # Handle paused state
-        if paused and paused_frame is not None:
-            output = draw_paused_overlay(paused_frame.copy())
-        else:
-            # Apply current effect
-            t = time.time()
-            output = apply_effect(frame, current_mode, smoothed_intensity, t)
+        # Apply current effect
+        t = time.time()
+        output = apply_effect(frame, current_mode, smoothed_intensity, t)
 
-            # Blend with previous mode for smooth transitions
-            if mode_blend_factor < 1.0 and previous_mode != current_mode:
-                previous_output = apply_effect(frame, previous_mode, smoothed_intensity, t)
-                output = cv2.addWeighted(previous_output, 1 - mode_blend_factor,
-                                        output, mode_blend_factor, 0)
+        # Blend with previous mode for smooth transitions
+        if mode_blend_factor < 1.0 and previous_mode != current_mode:
+            previous_output = apply_effect(frame, previous_mode, smoothed_intensity, t)
+            output = cv2.addWeighted(previous_output, 1 - mode_blend_factor,
+                                    output, mode_blend_factor, 0)
 
         # Draw UI overlay
         output = draw_ui(output, current_mode, smoothed_intensity, avg_fps, recording,
-                        left_hand_detected, right_hand_detected, single_hand_mode)
+                        hand_detected, mode_locked)
 
         # Write frame if recording
         if recording and video_writer is not None:
