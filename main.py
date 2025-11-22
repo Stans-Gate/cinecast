@@ -7,7 +7,7 @@ One hand controls everything:
 1. Start in NO MODE (passthrough)
 2. Make a gesture → LOCKS into that mode
 3. Control intensity with palm open/close
-4. Middle finger up → QUIT back to NO MODE
+4. Pinky up → QUIT back to NO MODE
 """
 
 import cv2
@@ -135,7 +135,7 @@ def main():
     print("  1. Start in NO MODE (camera passthrough)")
     print("  2. Make a gesture → LOCKS into that mode")
     print("  3. Control intensity by opening/closing palm")
-    print("  4. Middle finger up → QUIT to NO MODE")
+    print("  4. Pinky up → QUIT to NO MODE")
     print("\n🔓 AVAILABLE EFFECTS:")
     for effect in AVAILABLE_EFFECTS:
         print(f"  {effect.icon} {effect.name}")
@@ -143,8 +143,8 @@ def main():
     print("  • Fist closed = 0% intensity")
     print("  • Palm open = 100% intensity")
     print("  • Other gestures are IGNORED (no accidental switching!)")
-    print("\n🖕 QUIT GESTURE:")
-    print("  • Middle finger up ONLY → unlocks and returns to NO MODE")
+    print("\n🤙 QUIT GESTURE:")
+    print("  • Pinky up ONLY (or pinky + thumb) → unlocks and returns to NO MODE")
     print("\n⌨️  KEYBOARD CONTROLS:")
     print("  [R] Start/Stop Recording")
     print("  [Q] Quit Application")

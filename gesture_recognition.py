@@ -18,14 +18,21 @@ def count_extended_fingers(landmarks):
     """
     fingers_extended = [False] * 5
 
-    # Thumb: check if tip is far from palm in x-direction
+    # Thumb: check if tip is extended both horizontally and vertically
     thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
     thumb_ip = landmarks[mp_hands.HandLandmark.THUMB_IP]
+    thumb_mcp = landmarks[mp_hands.HandLandmark.THUMB_MCP]
     wrist = landmarks[mp_hands.HandLandmark.WRIST]
 
-    thumb_tip_dist = abs(thumb_tip.x - wrist.x)
-    thumb_ip_dist = abs(thumb_ip.x - wrist.x)
-    fingers_extended[0] = thumb_tip_dist > thumb_ip_dist * 1.3
+    # Calculate distance from tip to wrist vs IP to wrist
+    thumb_tip_dist = ((thumb_tip.x - wrist.x)**2 + (thumb_tip.y - wrist.y)**2) ** 0.5
+    thumb_ip_dist = ((thumb_ip.x - wrist.x)**2 + (thumb_ip.y - wrist.y)**2) ** 0.5
+
+    # Also check if thumb is above (lower y value) the MCP joint
+    thumb_is_up = thumb_tip.y < thumb_mcp.y
+
+    # Thumb is extended if tip is farther from wrist than IP joint
+    fingers_extended[0] = (thumb_tip_dist > thumb_ip_dist * 1.2) or thumb_is_up
 
     # Other fingers: tip above PIP joint
     finger_tips = [8, 12, 16, 20]
@@ -78,14 +85,17 @@ def get_palm_openness(landmarks):
 
 def is_quit_gesture(landmarks):
     """
-    Detect QUIT gesture: Middle finger up only
+    Detect QUIT gesture: Pinky finger up only (like "call me" gesture)
     Returns: True if quit gesture detected
     """
     count, extended = count_extended_fingers(landmarks)
 
-    # Middle finger up ONLY
-    if extended[2] and not extended[0] and not extended[1] and not extended[3] and not extended[4]:
-        return count == 1
+    # Pinky finger up ONLY (index 4 in the extended array)
+    # Accept with or without thumb extended
+    if extended[4] and not extended[1] and not extended[2] and not extended[3]:
+        # Either just pinky, or pinky + thumb (more forgiving)
+        if count == 1 or (count == 2 and extended[0]):
+            return True
 
     return False
 
