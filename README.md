@@ -8,9 +8,21 @@ Single-hand cinematic effects controlled by gestures. Lock into a mode and contr
 # Install dependencies
 pip install -r requirements.txt
 
+# For 3D model rendering (optional, but recommended):
+# The 3D Object effect uses pyrender and trimesh
+# These should be automatically installed with requirements.txt
+# If you encounter issues, install manually:
+# pip install trimesh pyrender
+
 # Run the application
 python main.py
 ```
+
+### 3D Model Rendering
+
+The 3D Object effect uses `pyrender` and `trimesh` for proper 3D model rendering. By default, it loads a sphere model. The effect will gracefully degrade if these libraries aren't installed (showing a message instead of crashing).
+
+To use custom 3D models, modify `effects/object_3d_effect.py` to load your `.obj` or other supported model files using trimesh.
 
 ## 📁 Project Structure
 
@@ -28,7 +40,8 @@ cinecast/
 │   ├── zoom_effect.py        # 👍 Dolly Zoom
 │   ├── rotate_effect.py      # ✌️ Rotate
 │   ├── blur_effect.py        # 🤘 Motion Blur
-│   └── filter_effect.py      # 👌 Color Grade
+│   ├── filter_effect.py      # 👌 Color Grade
+│   └── object_3d_effect.py   # 🎲 3D Object Interaction
 │
 └── cinecast.py               # Old monolithic file (can be deleted)
 ```
@@ -102,20 +115,41 @@ Your effect will now appear in the app!
 
 ## 🎮 How It Works
 
-1. **Start**: NO MODE (camera passthrough)
-2. **Lock**: Make a gesture (hold 0.5s) → locks into that mode
-3. **Control**: Open/close palm → adjusts intensity (0-100%)
-4. **Quit**: Middle finger up → returns to NO MODE
+1. **Start**: NO MODE (camera passthrough) - Menu visible on the right
+2. **Navigate**: Index finger swipe up/down → scroll through menu
+3. **Select**: OK sign (thumb + index touching) → lock into selected mode
+4. **Control**: Open/close palm → adjusts intensity (0-100%) or scale (3D mode)
+5. **Quit**: Thumbs down → returns to NO MODE (when locked)
 
-### Available Gestures
+### Menu System
 
-| Gesture | Effect | Description |
-|---------|--------|-------------|
-| 👍 Thumbs Up | Dolly Zoom | Cinematic zoom in/out |
-| ✌️ Peace Sign | Rotate | Continuous rotation |
-| 🤘 Rock Sign | Motion Blur | Variable blur intensity |
-| 👌 OK Sign | Color Grade | Cinematic color grading |
-| 🖕 Middle Finger | **QUIT** | Exit current mode |
+When **UNLOCKED** (menu visible):
+- **Index Finger Swipe Up/Down**: Scroll through available modes (more sensitive than hand movement)
+- **OK Sign**: Select highlighted mode (thumb and index finger touching)
+- Menu shows all available effects
+
+### Gesture Details
+
+- **Menu Scrolling**: Uses index finger tip movement for precise control
+- **Menu Selection**: OK sign (thumb touching index finger, other fingers extended)
+- **Quit**: Thumbs down gesture (thumb extended downward, other fingers closed)
+- **3D Mode**: Move hand to rotate, palm open/close to scale
+
+When **LOCKED** (mode active):
+- **Palm Openness**: Controls intensity (most modes) or scale (3D mode)
+- **3D Object Mode**: Move hand to rotate, palm open/close to scale
+- **Fist**: Quit back to menu
+
+### Available Modes
+
+| Mode | Icon | Description |
+|------|------|-------------|
+| Dolly Zoom | 👍 | Cinematic zoom in/out |
+| Rotate | ✌️ | Continuous rotation |
+| Motion Blur | 🤘 | Variable blur intensity |
+| Color Grade | 👌 | Cinematic color grading |
+| 3D Object | 🎲 | Interactive 3D model with gesture controls |
+| **QUIT** | ✊ | Exit current mode (fist gesture) |
 
 ## 🔧 Configuration
 
@@ -178,7 +212,9 @@ cv2.addWeighted()     # Alpha blend two images
 
 **Gesture not detecting?**
 - Increase `GESTURE_STABILITY_FRAMES` for more stability
-- Check `gesture_recognition.py` for gesture mapping
+- Make sure palm is visible and hand is well-lit
+- For menu scrolling, use smooth vertical hand movements
+- For menu selection, point clearly with index finger extended
 
 **Performance issues?**
 - Use `intensity < 0.05` check to skip processing
