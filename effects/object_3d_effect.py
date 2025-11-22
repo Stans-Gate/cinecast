@@ -38,7 +38,7 @@ class Object3DEffect(BaseEffect):
         self.target_scale = 1.0
         
         # Smoothing factor (0.0 = instant, 1.0 = never updates)
-        self.rotation_smoothing = 0.85  # 15% change per frame = smooth
+        self.rotation_smoothing = 0.90  # 10% change per frame = slower, smoother rotation
         self.scale_smoothing = 0.90     # 10% change per frame = smooth
         
         # Initialize pyrender scene
@@ -65,7 +65,8 @@ class Object3DEffect(BaseEffect):
         try:
             # Create scene with transparent background for AR overlay
             # bg_color=[0, 0, 0, 0] means fully transparent black background
-            self.scene = pyrender.Scene(ambient_light=[0.4, 0.4, 0.4], bg_color=[0, 0, 0, 0])
+            # Balanced ambient light so mesh stays bright while edges remain visible
+            self.scene = pyrender.Scene(ambient_light=[0.3, 0.3, 0.35], bg_color=[0, 0, 0, 0])
             
             # Create renderer at higher resolution for better quality
             # Higher quality rendering for crisp edges
@@ -85,12 +86,13 @@ class Object3DEffect(BaseEffect):
                     # Fall back to box (cube) which should always exist
                     mesh = trimesh.creation.box(extents=[2.0, 2.0, 2.0])
                 
-                # High-tech transparent material with black visible edges
-                # Semi-transparent cyan-blue material with high reflectivity
+                # Blue semi-transparent material - brighter blue and more transparent
                 material = pyrender.MetallicRoughnessMaterial(
-                    metallicFactor=0.95,
-                    roughnessFactor=0.0,  # Very reflective/shiny for high-tech look
-                    baseColorFactor=[0.15, 0.7, 1.0, 0.65]  # Bright cyan-blue with transparency (alpha=0.65)
+                    metallicFactor=0.4,
+                    roughnessFactor=0.35,
+                    alphaMode='BLEND',
+                    wireframe=True,
+                    baseColorFactor=[0.0, 0, 1.0, 0.8]  # Bright blue (RGB: 0,140,255) with 30% opacity
                 )
                 
                 # Create pyrender mesh from trimesh with smooth shading for clear edges
@@ -98,25 +100,25 @@ class Object3DEffect(BaseEffect):
                 
                 # Add edge mesh for black visible edges
                 # Create a slightly larger mesh with black material for edge outline
-                try:
-                    # Scale up mesh slightly for edge outline effect
-                    edge_mesh_geom = mesh.copy()
-                    edge_scale = 1.015  # 1.5% larger for subtle edge outline
-                    edge_mesh_geom.apply_scale(edge_scale)
+                # try:
+                #     # Scale up mesh slightly for edge outline effect
+                #     edge_mesh_geom = mesh.copy()
+                #     edge_scale = 1.015  # 1.5% larger for subtle edge outline
+                #     edge_mesh_geom.apply_scale(edge_scale)
                     
-                    # Black edge material - fully opaque for visibility
-                    edge_material = pyrender.MetallicRoughnessMaterial(
-                        metallicFactor=0.0,
-                        roughnessFactor=1.0,
-                        baseColorFactor=[0.0, 0.0, 0.0, 1.0]  # Solid black edges
-                    )
+                #     # Black edge material - fully opaque for visibility
+                #     edge_material = pyrender.MetallicRoughnessMaterial(
+                #         metallicFactor=0.0,
+                #         roughnessFactor=1.0,
+                #         baseColorFactor=[0.0, 0.0, 0.0, 1.0]  # Solid black edges
+                #     )
                     
-                    # Create edge mesh
-                    edge_mesh = pyrender.Mesh.from_trimesh(edge_mesh_geom, material=edge_material, smooth=False)
-                    self.edge_mesh_node = self.scene.add(edge_mesh)
-                except Exception as e:
-                    print(f"[3D] Could not create edge mesh: {e}")
-                    self.edge_mesh_node = None
+                #     # Create edge mesh
+                #     edge_mesh = pyrender.Mesh.from_trimesh(edge_mesh_geom, material=edge_material, smooth=False)
+                #     self.edge_mesh_node = self.scene.add(edge_mesh)
+                # except Exception as e:
+                #     print(f"[3D] Could not create edge mesh: {e}")
+                #     self.edge_mesh_node = None
                 
                 # For high-tech look, we'll rely on lighting and material properties
                 # rather than wireframe overlay
@@ -125,30 +127,42 @@ class Object3DEffect(BaseEffect):
                 # Add to scene
                 self.mesh_node = self.scene.add(pyrender_mesh)
                 
-                # Add lights for high-tech look with strong edge definition
-                # Main key light - bright and focused
-                key_light = pyrender.DirectionalLight(color=[0.9, 0.95, 1.0], intensity=4.0)
+                # Add lights tuned for edge visibility
+                # Main key light - directional, slightly softer to avoid over-darkening
+                key_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=10)
                 key_light_pose = np.eye(4)
-                key_light_pose[:3, 3] = [3, 4, 5]
+                key_light_pose[:3, 3] = [4, 5, 6]
                 self.scene.add(key_light, pose=key_light_pose)
                 
-                # Fill light from opposite side
-                fill_light = pyrender.DirectionalLight(color=[0.7, 0.8, 1.0], intensity=2.0)
+                # Fill light from opposite side - brighter to lift shadows
+                fill_light = pyrender.DirectionalLight(color=[0.8, 0.85, 0.95], intensity=10)
                 fill_light_pose = np.eye(4)
-                fill_light_pose[:3, 3] = [-3, 2, 4]
+                fill_light_pose[:3, 3] = [-4, 2, 5]
                 self.scene.add(fill_light, pose=fill_light_pose)
                 
-                # Rim light for edge definition - bright cyan for high-tech glow
-                rim_light = pyrender.DirectionalLight(color=[0.5, 0.9, 1.0], intensity=3.5)
+                # Rim light for edge definition - bright cyan rim to highlight edges
+                rim_light = pyrender.DirectionalLight(color=[0.4, 0.9, 1.0], intensity=10)
                 rim_light_pose = np.eye(4)
-                rim_light_pose[:3, 3] = [0, -3, 3]
+                rim_light_pose[:3, 3] = [0, -4, 4]
                 self.scene.add(rim_light, pose=rim_light_pose)
                 
-                # Additional point light for extra glow effect
-                point_light = pyrender.PointLight(color=[0.6, 0.85, 1.0], intensity=2.5)
+                # Additional point light from side for soft highlights
+                point_light = pyrender.PointLight(color=[0.9, 0.95, 1.0], intensity=10)
                 point_light_pose = np.eye(4)
-                point_light_pose[:3, 3] = [0, 0, 3]
+                point_light_pose[:3, 3] = [3, 0, 4.5]
                 self.scene.add(point_light, pose=point_light_pose)
+                
+                # Another point light from opposite side for balanced lighting
+                point_light2 = pyrender.PointLight(color=[0.7, 0.75, 0.85], intensity=10)
+                point_light2_pose = np.eye(4)
+                point_light2_pose[:3, 3] = [-3, 0, 4.5]
+                self.scene.add(point_light2, pose=point_light2_pose)
+                
+                # Top light to keep the mesh bright
+                top_light = pyrender.DirectionalLight(color=[0.85, 0.9, 0.95], intensity=15.0)
+                top_light_pose = np.eye(4)
+                top_light_pose[:3, 3] = [0, 4.5, 3.5]
+                self.scene.add(top_light, pose=top_light_pose)
                 
                 self.model_loaded = True
                 print("[3D] Model loaded successfully")
@@ -274,6 +288,16 @@ class Object3DEffect(BaseEffect):
                 alpha_2d = color[:, :, 3].astype(np.float32) / 255.0  # Normalize alpha to 0-1
                 alpha = np.expand_dims(alpha_2d, axis=2)  # Shape: (H, W, 1)
                 color_rgb = color[:, :, :3]  # Extract RGB channels
+                
+                # Enhance blue color to make it more vibrant and visible
+                # Boost blue channel while maintaining relative color balance
+                color_rgb = color_rgb.astype(np.float32)
+                # Increase blue channel intensity
+                color_rgb[:, :, 2] = np.clip(color_rgb[:, :, 2] * 1.3, 0, 255)  # Boost blue by 30%
+                # Reduce red and green to make it more pure blue
+                color_rgb[:, :, 0] = np.clip(color_rgb[:, :, 0] * 0.5, 0, 255)  # Reduce red
+                color_rgb[:, :, 1] = np.clip(color_rgb[:, :, 1] * 0.7, 0, 255)  # Reduce green
+                color_rgb = color_rgb.astype(np.uint8)
             elif color.shape[2] == 3:
                 # RGB image - create alpha from depth (white pixels = object, black = transparent)
                 # Use depth buffer to create alpha mask
