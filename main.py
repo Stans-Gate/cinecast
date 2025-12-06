@@ -18,6 +18,9 @@ from collections import deque
 # Import our modules
 from effects import AVAILABLE_EFFECTS
 from gesture_recognition import (
+    initialize_gesture_recognizer,
+    process_frame_for_gestures,
+    get_recognized_gesture_name,
     get_palm_openness,
     is_quit_gesture,
     classify_mode_gesture,
@@ -68,6 +71,11 @@ hands = mp_hands.Hands(
 )
 mp_draw = mp.solutions.drawing_utils
 
+# Initialize MediaPipe Gesture Recognizer
+print("[INIT] Initializing MediaPipe Gesture Recognizer...")
+initialize_gesture_recognizer()
+print("[INIT] Gesture Recognizer ready!")
+
 # Build effect lookup by mode_id
 effects_by_id = {effect.mode_id: effect for effect in AVAILABLE_EFFECTS}
 
@@ -92,6 +100,8 @@ hand_detected = False
 gesture_buffer = deque(maxlen=GESTURE_STABILITY_FRAMES)
 quit_buffer = deque(maxlen=QUIT_GESTURE_FRAMES)
 previous_hand_position = None  # For 3D rotation tracking
+current_gesture_name = None  # Current recognized gesture from MediaPipe
+current_gesture_confidence = 0.0  # Confidence score
 
 # Recording
 recording = False
@@ -145,6 +155,7 @@ def main():
     global gesture_buffer, quit_buffer
     global menu_visible, selected_menu_index, menu_scroll_buffer, menu_select_buffer
     global previous_hand_position, last_scroll_direction
+    global current_gesture_name, current_gesture_confidence
     
     # Initialize scroll timing (local variable that persists across iterations)
     last_scroll_time_local = 0.0
@@ -190,10 +201,17 @@ def main():
         h, w = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Hand detection
+        # Process frame with MediaPipe Gesture Recognizer
+        timestamp_ms = int(current_time * 1000)
+        gesture_result = process_frame_for_gestures(frame, timestamp_ms)
+
+        # Get recognized gesture for UI display
+        current_gesture_name, current_gesture_confidence = get_recognized_gesture_name(gesture_result)
+
+        # Hand detection (still using MediaPipe Hands for landmarks)
         results = hands.process(rgb)
         hand_detected = False
-        
+
         # Store results for effect application (needed for Iron Man effect)
         current_hand_landmarks = None
 
@@ -214,8 +232,8 @@ def main():
             # Get current hand position for tracking
             current_hand_position = get_hand_position(landmarks)
 
-            # Check for QUIT gesture (fist)
-            if is_quit_gesture(landmarks):
+            # Check for QUIT gesture (thumbs down)
+            if is_quit_gesture(landmarks, gesture_result):
                 quit_buffer.append(True)
 
                 if len(quit_buffer) == QUIT_GESTURE_FRAMES:
@@ -266,7 +284,7 @@ def main():
                 menu_visible = True
                 
                 # Menu scrolling using index finger up/down gestures with cooldown
-                scroll_direction = detect_menu_scroll_gesture(landmarks)
+                scroll_direction = detect_menu_scroll_gesture(landmarks, gesture_result)
                 if scroll_direction:
                     menu_scroll_buffer.append(scroll_direction)
                     if len(menu_scroll_buffer) >= MENU_SCROLL_STABILITY_FRAMES:
@@ -362,7 +380,8 @@ def main():
 
         # Draw UI overlay
         output = draw_ui(output, effect_name, effect_icon, smoothed_intensity, avg_fps,
-                        recording, hand_detected, mode_locked)
+                        recording, hand_detected, mode_locked,
+                        current_gesture_name, current_gesture_confidence)
         output = draw_mode_menu(output, AVAILABLE_EFFECTS, selected_menu_index, menu_visible and not mode_locked)
         output = draw_gesture_guide(output, mode_locked, AVAILABLE_EFFECTS, current_effect)
 

@@ -7,15 +7,19 @@ All UI drawing functions
 import cv2
 
 
-def draw_ui(frame, effect_name, effect_icon, intensity, fps, recording_status, hand_detected, locked):
+def draw_ui(frame, effect_name, effect_icon, intensity, fps, recording_status, hand_detected, locked,
+            gesture_name=None, gesture_confidence=0.0):
     """
     Draw comprehensive UI overlay
+    Args:
+        gesture_name: Recognized gesture name from MediaPipe (for debugging)
+        gesture_confidence: Confidence score of the recognized gesture
     """
     h, w = frame.shape[:2]
 
-    # Semi-transparent overlay panel
+    # Semi-transparent overlay panel (taller to fit gesture info)
     overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (w, 150), (0, 0, 0), -1)
+    cv2.rectangle(overlay, (0, 0), (w, 180), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
 
     # Lock status
@@ -62,6 +66,16 @@ def draw_ui(frame, effect_name, effect_icon, intensity, fps, recording_status, h
     hand_status = "[HAND]" if hand_detected else "[NO HAND]"
     cv2.putText(frame, f"{hand_status} {'Detected' if hand_detected else 'Not Detected'}",
                 (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, hand_color, 2)
+
+    # Gesture recognition output (for debugging)
+    if gesture_name:
+        gesture_color = (255, 200, 100)  # Orange/yellow for gesture info
+        confidence_percent = int(gesture_confidence * 100)
+        cv2.putText(frame, f"[GESTURE] {gesture_name} ({confidence_percent}%)",
+                    (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.5, gesture_color, 2)
+    else:
+        cv2.putText(frame, f"[GESTURE] None detected",
+                    (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 80, 80), 2)
 
     # FPS counter
     cv2.putText(frame, f"FPS: {fps:.1f}", (w - 120, 30),

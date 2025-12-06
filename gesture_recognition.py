@@ -1,15 +1,114 @@
 """
 Gesture Recognition Module
 ===========================
-All hand gesture detection logic
+All hand gesture detection logic using MediaPipe Gesture Recognizer
 """
 
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 import numpy as np
 import math
+import cv2
 
 
 mp_hands = mp.solutions.hands
+
+# Global gesture recognizer instance
+_gesture_recognizer = None
+
+
+def initialize_gesture_recognizer(model_path='models/gesture_recognizer.task'):
+    """
+    Initialize the MediaPipe Gesture Recognizer for video mode
+    Returns: GestureRecognizer instance
+    """
+    global _gesture_recognizer
+
+    base_options = python.BaseOptions(model_asset_path=model_path)
+    options = vision.GestureRecognizerOptions(
+        base_options=base_options,
+        running_mode=vision.RunningMode.VIDEO,  # Video mode for processing video streams
+        num_hands=2,
+        min_hand_detection_confidence=0.7,
+        min_hand_presence_confidence=0.7,
+        min_tracking_confidence=0.7
+    )
+    _gesture_recognizer = vision.GestureRecognizer.create_from_options(options)
+    return _gesture_recognizer
+
+
+def get_gesture_recognizer():
+    """Get the global gesture recognizer instance"""
+    global _gesture_recognizer
+    if _gesture_recognizer is None:
+        initialize_gesture_recognizer()
+    return _gesture_recognizer
+
+
+def process_frame_for_gestures(frame, timestamp_ms):
+    """
+    Process a video frame for gesture recognition
+    Args:
+        frame: BGR image from OpenCV
+        timestamp_ms: Timestamp in milliseconds
+    Returns:
+        GestureRecognizerResult or None if recognition fails
+    """
+    recognizer = get_gesture_recognizer()
+
+    # Convert BGR to RGB
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # Create MediaPipe Image
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+
+    # Recognize gestures
+    try:
+        result = recognizer.recognize_for_video(mp_image, timestamp_ms)
+        return result
+    except Exception as e:
+        print(f"[ERROR] Gesture recognition failed: {e}")
+        return None
+
+
+def get_recognized_gesture_name(gesture_result):
+    """
+    Get the recognized gesture name from MediaPipe result
+    Returns: (gesture_name, confidence) or (None, 0.0) if no gesture detected
+    """
+    if not gesture_result or not gesture_result.gestures:
+        return None, 0.0
+
+    # Get the top gesture from the first hand
+    if len(gesture_result.gestures) > 0 and len(gesture_result.gestures[0]) > 0:
+        top_gesture = gesture_result.gestures[0][0]
+        return top_gesture.category_name, top_gesture.score
+
+    return None, 0.0
+
+
+def map_gesture_to_mode_id(gesture_name):
+    """
+    Map MediaPipe gesture names to our mode IDs
+    MediaPipe gestures: Closed_Fist, Open_Palm, Pointing_Up, Thumb_Down, Thumb_Up, Victory, ILoveYou
+    Our modes:
+        1: Thumbs Up
+        2: Peace Sign (Victory)
+        3: Rock Sign (ILoveYou)
+        4: OK Sign (not in MediaPipe default gestures)
+        5: 3D Object
+        6: Iron Man
+    Returns: mode_id or None
+    """
+    gesture_map = {
+        'Thumb_Up': 1,
+        'Victory': 2,
+        'ILoveYou': 3,
+        # 'Open_Palm': 4,  # We'll use custom OK detection for mode 4
+    }
+
+    return gesture_map.get(gesture_name, None)
 
 
 def count_extended_fingers(landmarks):
@@ -97,11 +196,25 @@ def is_quit_gesture(landmarks):
     return False
 
 
-def classify_mode_gesture(landmarks, available_effects):
+def classify_mode_gesture(landmarks, available_effects, gesture_result=None):
     """
-    Classify gesture to lock into a mode
+    Classify gesture to lock into a mode using MediaPipe Gesture Recognizer
+    Falls back to custom detection for gestures not in MediaPipe
+    Args:
+        landmarks: Hand landmarks
+        available_effects: List of available effects
+        gesture_result: MediaPipe GestureRecognizerResult (optional)
     Returns: effect mode_id or None
     """
+    # Try MediaPipe gesture recognition first
+    if gesture_result:
+        gesture_name, confidence = get_recognized_gesture_name(gesture_result)
+        if gesture_name and confidence > 0.7:  # Confidence threshold
+            mode_id = map_gesture_to_mode_id(gesture_name)
+            if mode_id is not None:
+                return mode_id
+
+    # Fall back to custom detection for OK sign (mode_id 4) - not in MediaPipe
     count, extended = count_extended_fingers(landmarks)
 
     # Get thumb and index positions for OK sign
@@ -115,71 +228,68 @@ def classify_mode_gesture(landmarks, available_effects):
         if others_up >= 2:
             return 4
 
-    # THUMBS UP (mode_id 1)
-    if extended[0] and count == 1:
-        return 1
-
-    # PEACE SIGN (mode_id 2)
-    if extended[1] and extended[2] and not extended[3] and not extended[4]:
-        if count == 2 or (count == 3 and extended[0]):
-            return 2
-
-    # ROCK SIGN (mode_id 3)
-    if extended[1] and extended[4] and not extended[2] and not extended[3]:
-        if count == 2 or (count == 3 and extended[0]):
-            return 3
-
     return None
 
 
-def detect_menu_scroll_gesture(landmarks):
+def detect_menu_scroll_gesture(landmarks, gesture_result=None):
     """
     Detect menu scroll gesture: index finger pointing up (scroll up) or down (scroll down)
+    Uses MediaPipe Gesture Recognizer and custom detection
+    Args:
+        landmarks: Hand landmarks
+        gesture_result: MediaPipe GestureRecognizerResult (optional)
     Returns: 'up', 'down', or None
     """
+    # Try MediaPipe gesture recognition for pointing up
+    if gesture_result:
+        gesture_name, confidence = get_recognized_gesture_name(gesture_result)
+        if gesture_name == 'Pointing_Up' and confidence > 0.7:
+            return 'up'
+
+    # Custom detection for both up and down
     count, extended = count_extended_fingers(landmarks)
-    
+
     # Get index finger landmarks
     index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
     index_pip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_PIP]
     index_mcp = landmarks[mp_hands.HandLandmark.INDEX_FINGER_MCP]
     index_dip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_DIP]
-    
+
     # Check if index finger is straight/extended regardless of direction
     # Measure distance from tip to MCP to determine if finger is extended
     tip_to_mcp_dist = ((index_tip.x - index_mcp.x)**2 + (index_tip.y - index_mcp.y)**2) ** 0.5
     pip_to_mcp_dist = ((index_pip.x - index_mcp.x)**2 + (index_pip.y - index_mcp.y)**2) ** 0.5
-    
+
     # Finger is extended if tip is far from MCP (relative to PIP distance)
     # This works regardless of whether pointing up or down
     is_extended = tip_to_mcp_dist > pip_to_mcp_dist * 1.5
-    
+
     if not is_extended:
         return None
-    
+
     # Check index finger orientation (up or down)
     # Index finger pointing up: tip is above PIP and MCP
-    index_pointing_up = (index_tip.y < index_pip.y - 0.02 and 
+    index_pointing_up = (index_tip.y < index_pip.y - 0.02 and
                         index_tip.y < index_mcp.y - 0.02)
-    
+
     # Index finger pointing down: tip is below PIP and MCP
-    index_pointing_down = (index_tip.y > index_pip.y + 0.02 and 
+    index_pointing_down = (index_tip.y > index_pip.y + 0.02 and
                           index_tip.y > index_mcp.y + 0.02)
-    
+
     # For scroll up: index pointing up, other fingers mostly closed
     if index_pointing_up:
         # Allow thumb to be extended, but other fingers should be closed
         other_fingers_closed = not extended[2] and not extended[3] and not extended[4]
         if other_fingers_closed:
             return 'up'
-    
+
     # For scroll down: index pointing down, other fingers mostly closed
     elif index_pointing_down:
         # Allow thumb to be extended, but other fingers should be closed
         other_fingers_closed = not extended[2] and not extended[3] and not extended[4]
         if other_fingers_closed:
             return 'down'
-    
+
     return None
 
 
@@ -207,29 +317,40 @@ def detect_menu_select_gesture(landmarks):
     return False
 
 
-def is_quit_gesture(landmarks):
+def is_quit_gesture(landmarks, gesture_result=None):
     """
-    Detect QUIT gesture: Thumbs down (thumb extended downward)
+    Detect QUIT gesture: Thumbs down using MediaPipe Gesture Recognizer
+    Falls back to custom detection if MediaPipe doesn't detect it
+    Args:
+        landmarks: Hand landmarks
+        gesture_result: MediaPipe GestureRecognizerResult (optional)
     Returns: True if quit gesture detected
     """
+    # Try MediaPipe gesture recognition first
+    if gesture_result:
+        gesture_name, confidence = get_recognized_gesture_name(gesture_result)
+        if gesture_name == 'Thumb_Down' and confidence > 0.7:
+            return True
+
+    # Fall back to custom detection
     count, extended = count_extended_fingers(landmarks)
-    
+
     # Get thumb landmarks
     thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
     thumb_mcp = landmarks[mp_hands.HandLandmark.THUMB_MCP]
     wrist = landmarks[mp_hands.HandLandmark.WRIST]
-    
+
     # Thumbs down: thumb extended downward (tip below MCP in Y direction)
     # And thumb is extended outward from hand
     thumb_extended_outward = abs(thumb_tip.x - wrist.x) > abs(thumb_mcp.x - wrist.x) * 1.2
     thumb_pointing_down = thumb_tip.y > thumb_mcp.y + 0.05  # Thumb tip below MCP
-    
+
     # All other fingers should be closed (or mostly closed)
     other_fingers_closed = not extended[1] and not extended[2] and not extended[3] and not extended[4]
-    
+
     if thumb_extended_outward and thumb_pointing_down and other_fingers_closed:
         return True
-    
+
     return False
 
 
