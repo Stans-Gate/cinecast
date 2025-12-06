@@ -12,6 +12,7 @@ from effects.zoom_effect import ZoomEffect
 from effects.rotate_effect import RotateEffect
 from effects.blur_effect import BlurEffect
 from effects.filter_effect import FilterEffect
+from effects.ironman_effect import IronManEffect
 
 # List of all available effects
 # Add new effects here to make them available in the app
@@ -20,6 +21,7 @@ AVAILABLE_EFFECTS = [
     RotateEffect(),
     BlurEffect(),
     FilterEffect(),
+    IronManEffect(),
 ]
 
-__all__ = ['AVAILABLE_EFFECTS', 'ZoomEffect', 'RotateEffect', 'BlurEffect', 'FilterEffect']
+__all__ = ['AVAILABLE_EFFECTS', 'ZoomEffect', 'RotateEffect', 'BlurEffect', 'FilterEffect', 'IronManEffect']

@@ -105,7 +105,7 @@ Your effect will now appear in the app!
 1. **Start**: NO MODE (camera passthrough)
 2. **Lock**: Make a gesture (hold 0.5s) → locks into that mode
 3. **Control**: Open/close palm → adjusts intensity (0-100%)
-4. **Quit**: Middle finger up → returns to NO MODE
+4. **Quit**: Pinky up → returns to NO MODE
 
 ### Available Gestures
 
@@ -115,7 +115,8 @@ Your effect will now appear in the app!
 | ✌️ Peace Sign | Rotate | Continuous rotation |
 | 🤘 Rock Sign | Motion Blur | Variable blur intensity |
 | 👌 OK Sign | Color Grade | Cinematic color grading |
-| 🖕 Middle Finger | **QUIT** | Exit current mode |
+| ✋ Open Palm | Iron Man Gauntlet | AR armor overlay with dynamic relighting |
+| 🤙 Pinky Up | **QUIT** | Exit current mode |
 
 ## 🔧 Configuration
 

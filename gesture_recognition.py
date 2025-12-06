@@ -112,6 +112,11 @@ def classify_mode_gesture(landmarks, available_effects):
     index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
     ok_dist = ((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2) ** 0.5
 
+    # OPEN PALM (mode_id 5) - All 5 fingers extended (Iron Man)
+    # Check this first to avoid conflicts with other gestures
+    if count == 5 and all(extended):
+        return 5
+
     # OK SIGN (mode_id 4)
     if ok_dist < 0.06 and (extended[2] or extended[3] or extended[4]):
         others_up = sum([extended[2], extended[3], extended[4]])

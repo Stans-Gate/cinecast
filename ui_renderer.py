@@ -105,7 +105,7 @@ def draw_gesture_guide(frame, locked, available_effects):
             "",
             "Close/Open palm = Intensity",
             "",
-            "🖕 Middle Finger Up = QUIT"
+            "🤙 Pinky Up = QUIT"
         ]
     else:
         # Show available modes when unlocked
