@@ -19,7 +19,7 @@ class BaseEffect(ABC):
     def __init__(self, name: str, icon: str, mode_id: int):
         """
         Args:
-            name: Display name of the effect (e.g., "Dolly Zoom")
+            name: Display name of the effect (e.g., "Zoom")
             icon: Emoji icon for UI (e.g., "👍")
             mode_id: Unique identifier for this effect
         """

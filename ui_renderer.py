@@ -5,6 +5,7 @@ All UI drawing functions
 """
 
 import cv2
+import numpy as np
 
 
 def draw_ui(frame, effect_name, effect_icon, intensity, fps, recording_status, hand_detected, locked,
@@ -242,5 +243,124 @@ def draw_gesture_guide(frame, locked, available_effects, current_effect=None):
         cv2.putText(frame, instruction, (guide_x + 10, y_offset),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1)
         y_offset += 22
+
+    return frame
+
+
+def draw_vfx_suggestion(frame, suggestion):
+    """
+    Draw VFX suggestion overlay on the frame
+
+    Args:
+        frame: Input frame
+        suggestion: dict with keys:
+            - effect_name: str
+            - reason: str
+            - confidence: float (0-1)
+            - highlight_region: tuple (x, y, w, h) or None
+
+    Returns:
+        Modified frame with suggestion overlay
+    """
+    if not suggestion:
+        return frame
+
+    h, w = frame.shape[:2]
+
+    # Draw highlight region if provided (e.g., detected book)
+    if suggestion.get('highlight_region'):
+        x, y, rect_w, rect_h = suggestion['highlight_region']
+
+        # Draw pulsing highlight box
+        import time
+        pulse = 0.7 + 0.3 * abs(np.sin(time.time() * 3))
+
+        # Green highlight for detected objects
+        color = (int(100 * pulse), int(255 * pulse), int(100 * pulse))
+        thickness = 3
+
+        cv2.rectangle(frame, (x, y), (x + rect_w, y + rect_h), color, thickness)
+
+        # Draw corner markers for emphasis
+        marker_length = min(30, rect_w // 5, rect_h // 5)
+
+        # Top-left corner
+        cv2.line(frame, (x, y), (x + marker_length, y), color, thickness + 1)
+        cv2.line(frame, (x, y), (x, y + marker_length), color, thickness + 1)
+
+        # Top-right corner
+        cv2.line(frame, (x + rect_w, y), (x + rect_w - marker_length, y), color, thickness + 1)
+        cv2.line(frame, (x + rect_w, y), (x + rect_w, y + marker_length), color, thickness + 1)
+
+        # Bottom-left corner
+        cv2.line(frame, (x, y + rect_h), (x + marker_length, y + rect_h), color, thickness + 1)
+        cv2.line(frame, (x, y + rect_h), (x, y + rect_h - marker_length), color, thickness + 1)
+
+        # Bottom-right corner
+        cv2.line(frame, (x + rect_w, y + rect_h), (x + rect_w - marker_length, y + rect_h), color, thickness + 1)
+        cv2.line(frame, (x + rect_w, y + rect_h), (x + rect_w, y + rect_h - marker_length), color, thickness + 1)
+
+    # Draw suggestion panel
+    panel_width = 350
+    panel_height = 100
+    panel_x = (w - panel_width) // 2  # Center horizontally
+    panel_y = h - panel_height - 30   # Bottom of screen
+
+    # Semi-transparent background
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (panel_x, panel_y),
+                  (panel_x + panel_width, panel_y + panel_height),
+                  (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+
+    # Border with color based on confidence
+    confidence = suggestion.get('confidence', 0)
+    border_color = (
+        int(100 + 155 * (1 - confidence)),  # B: less blue when confident
+        int(100 + 155 * confidence),         # G: more green when confident
+        int(100)                             # R: constant
+    )
+    cv2.rectangle(frame, (panel_x, panel_y),
+                  (panel_x + panel_width, panel_y + panel_height),
+                  border_color, 2)
+
+    # Title
+    cv2.putText(frame, "VFX Suggestion",
+                (panel_x + 10, panel_y + 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    # Effect name
+    effect_name = suggestion.get('effect_name', 'Unknown')
+    cv2.putText(frame, f"Effect: {effect_name}",
+                (panel_x + 10, panel_y + 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 255, 150), 1)
+
+    # Reason
+    reason = suggestion.get('reason', '')
+    cv2.putText(frame, f"Reason: {reason}",
+                (panel_x + 10, panel_y + 72),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+
+    # Confidence bar
+    bar_x = panel_x + 10
+    bar_y = panel_y + 82
+    bar_width = panel_width - 20
+    bar_height = 10
+
+    # Background bar
+    cv2.rectangle(frame, (bar_x, bar_y),
+                  (bar_x + bar_width, bar_y + bar_height),
+                  (60, 60, 60), -1)
+
+    # Confidence fill
+    fill_width = int(bar_width * confidence)
+    cv2.rectangle(frame, (bar_x, bar_y),
+                  (bar_x + fill_width, bar_y + bar_height),
+                  border_color, -1)
+
+    # Confidence percentage
+    cv2.putText(frame, f"{int(confidence * 100)}%",
+                (bar_x + bar_width + 5, bar_y + bar_height - 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1)
 
     return frame

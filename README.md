@@ -37,7 +37,7 @@ cinecast/
 ├── effects/                   # 🎨 All visual effects (teammates work here!)
 │   ├── __init__.py           # Register effects here
 │   ├── base_effect.py        # Base class for all effects
-│   ├── zoom_effect.py        # 👍 Dolly Zoom
+│   ├── zoom_effect.py        # 👍 Zoom
 │   ├── rotate_effect.py      # ✌️ Rotate
 │   ├── blur_effect.py        # 🤘 Motion Blur
 │   ├── filter_effect.py      # 👌 Color Grade
@@ -146,7 +146,7 @@ When **LOCKED** (mode active):
 
 | Mode        | Icon | Description                                |
 | ----------- | ---- | ------------------------------------------ |
-| Dolly Zoom  | 👍   | Cinematic zoom in/out                      |
+| Zoom        | 👍   | Cinematic zoom in/out                      |
 | Rotate      | ✌️   | Continuous rotation                        |
 | Motion Blur | 🤘   | Variable blur intensity                    |
 | Color Grade | 👌   | Cinematic color grading                    |

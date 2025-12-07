@@ -30,7 +30,8 @@ from gesture_recognition import (
     detect_3d_rotation_gesture,
     detect_3d_scale_gesture
 )
-from ui_renderer import draw_ui, draw_gesture_guide, draw_mode_menu
+from ui_renderer import draw_ui, draw_gesture_guide, draw_mode_menu, draw_vfx_suggestion
+from scene_analyzer import SceneAnalyzer
 
 
 # ============================================================================
@@ -75,6 +76,11 @@ mp_draw = mp.solutions.drawing_utils
 print("[INIT] Initializing MediaPipe Gesture Recognizer...")
 initialize_gesture_recognizer()
 print("[INIT] Gesture Recognizer ready!")
+
+# Initialize Scene Analyzer for VFX suggestions
+print("[INIT] Initializing Scene Analyzer...")
+scene_analyzer = SceneAnalyzer()
+print("[INIT] Scene Analyzer ready!")
 
 # Build effect lookup by mode_id
 effects_by_id = {effect.mode_id: effect for effect in AVAILABLE_EFFECTS}
@@ -156,7 +162,8 @@ def main():
     global menu_visible, selected_menu_index, menu_scroll_buffer, menu_select_buffer
     global previous_hand_position, last_scroll_direction
     global current_gesture_name, current_gesture_confidence
-    
+    global scene_analyzer
+
     # Initialize scroll timing (local variable that persists across iterations)
     last_scroll_time_local = 0.0
 
@@ -189,8 +196,8 @@ def main():
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("[ERROR] Failed to capture frame")
-            break
+            # print("[ERROR] Failed to capture frame")
+            continue
 
         # FPS calculation
         current_time = time.time()
@@ -361,8 +368,8 @@ def main():
         t = time.time()
         if current_effect:
             # Special handling for Iron Man effect - needs hand landmarks
-            if current_effect.mode_id == 6 and hand_detected and current_hand_landmarks is not None:
-                current_effect.set_hand_landmarks(current_hand_landmarks)
+            # if current_effect.mode_id == 6 and hand_detected and current_hand_landmarks is not None:
+            #     current_effect.set_hand_landmarks(current_hand_landmarks)
             
             output = current_effect.apply(frame, smoothed_intensity, t)
 
@@ -374,6 +381,11 @@ def main():
         else:
             output = frame  # Passthrough (no effect)
 
+        # Analyze scene and get VFX suggestions (only when not locked)
+        vfx_suggestion = None
+        if not mode_locked:
+            vfx_suggestion = scene_analyzer.analyze_frame(output, current_time)
+
         # Get current effect info for UI
         effect_name = current_effect.name if current_effect else "No Mode (Passthrough)"
         effect_icon = current_effect.icon if current_effect else "🎬"
@@ -384,6 +396,10 @@ def main():
                         current_gesture_name, current_gesture_confidence)
         output = draw_mode_menu(output, AVAILABLE_EFFECTS, selected_menu_index, menu_visible and not mode_locked)
         output = draw_gesture_guide(output, mode_locked, AVAILABLE_EFFECTS, current_effect)
+
+        # Draw VFX suggestion (only when unlocked)
+        if not mode_locked and vfx_suggestion:
+            output = draw_vfx_suggestion(output, vfx_suggestion)
 
         # Write frame if recording
         if recording and video_writer is not None:

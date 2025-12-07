@@ -298,9 +298,9 @@ def detect_menu_scroll_gesture(landmarks, gesture_result=None):
     # For scroll down: index pointing down, other fingers mostly closed
     elif index_pointing_down:
         # Allow thumb to be extended, but other fingers should be closed
-        other_fingers_closed = not extended[2] and not extended[3] and not extended[4]
-        if other_fingers_closed:
-            return 'down'
+        # other_fingers_closed = not extended[2] and not extended[3] and not extended[4]
+        # if other_fingers_closed:
+        return 'down'
 
     return None
 

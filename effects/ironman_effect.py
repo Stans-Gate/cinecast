@@ -78,7 +78,8 @@ class IronManEffect(BaseEffect):
         output = self._draw_gauntlet(output, landmarks, w, h, intensity)
 
         # Draw arc reactor glow
-        output = self._draw_arc_reactor(output, palm_center, intensity, time)
+        if palm_orientation < 0.3:
+            output = self._draw_arc_reactor(output, palm_center, intensity, time)
 
         return output
 

@@ -1,5 +1,5 @@
 """
-Dolly Zoom Effect
+Zoom Effect
 =================
 Cinematic zoom effect with subtle oscillation
 """
@@ -10,10 +10,10 @@ from effects.base_effect import BaseEffect
 
 
 class ZoomEffect(BaseEffect):
-    """Dolly zoom effect - zoom in/out based on intensity"""
+    """Zoom effect - zoom in/out based on intensity"""
 
     def __init__(self):
-        super().__init__(name="Dolly Zoom", icon="👍", mode_id=1)
+        super().__init__(name="Zoom", icon="👍", mode_id=1)
 
     def apply(self, frame: np.ndarray, intensity: float, time: float) -> np.ndarray:
         """
