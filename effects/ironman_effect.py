@@ -20,7 +20,7 @@ class IronManEffect(BaseEffect):
         super().__init__(
             name="Iron Man Gauntlet",
             icon="🦾",
-            mode_id=5
+            mode_id=6
         )
         # Import mediapipe lazily to avoid import errors
         try:
