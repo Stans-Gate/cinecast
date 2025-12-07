@@ -124,32 +124,34 @@ Your effect will now appear in the app!
 ### Menu System
 
 When **UNLOCKED** (menu visible):
-- **Index Finger Swipe Up/Down**: Scroll through available modes (more sensitive than hand movement)
-- **OK Sign**: Select highlighted mode (thumb and index finger touching)
-- Menu shows all available effects
+
+-   **Index Finger Swipe Up/Down**: Scroll through available modes (more sensitive than hand movement)
+-   **OK Sign**: Select highlighted mode (thumb and index finger touching)
+-   Menu shows all available effects
 
 ### Gesture Details
 
-- **Menu Scrolling**: Uses index finger tip movement for precise control
-- **Menu Selection**: OK sign (thumb touching index finger, other fingers extended)
-- **Quit**: Thumbs down gesture (thumb extended downward, other fingers closed)
-- **3D Mode**: Move hand to rotate, palm open/close to scale
+-   **Menu Scrolling**: Uses index finger tip movement for precise control
+-   **Menu Selection**: OK sign (thumb touching index finger, other fingers extended)
+-   **Quit**: Thumbs down gesture (thumb extended downward, other fingers closed)
+-   **3D Mode**: Move hand to rotate, palm open/close to scale
 
 When **LOCKED** (mode active):
-- **Palm Openness**: Controls intensity (most modes) or scale (3D mode)
-- **3D Object Mode**: Move hand to rotate, palm open/close to scale
-- **Fist**: Quit back to menu
+
+-   **Palm Openness**: Controls intensity (most modes) or scale (3D mode)
+-   **3D Object Mode**: Move hand to rotate, palm open/close to scale
+-   **Fist**: Quit back to menu
 
 ### Available Modes
 
-| Mode | Icon | Description |
-|------|------|-------------|
-| Dolly Zoom | 👍 | Cinematic zoom in/out |
-| Rotate | ✌️ | Continuous rotation |
-| Motion Blur | 🤘 | Variable blur intensity |
-| Color Grade | 👌 | Cinematic color grading |
-| 3D Object | 🎲 | Interactive 3D model with gesture controls |
-| **QUIT** | ✊ | Exit current mode (fist gesture) |
+| Mode        | Icon | Description                                |
+| ----------- | ---- | ------------------------------------------ |
+| Dolly Zoom  | 👍   | Cinematic zoom in/out                      |
+| Rotate      | ✌️   | Continuous rotation                        |
+| Motion Blur | 🤘   | Variable blur intensity                    |
+| Color Grade | 👌   | Cinematic color grading                    |
+| 3D Object   | 🎲   | Interactive 3D model with gesture controls |
+| **QUIT**    | ✊   | Exit current mode (fist gesture)           |
 
 ## 🔧 Configuration
 
@@ -166,14 +168,14 @@ MODE_TRANSITION_SPEED = 0.2    # Crossfade speed between modes
 
 ### Example Effects You Can Build:
 
-- **Vignette**: Darken edges based on intensity
-- **Chromatic Aberration**: RGB channel shift
-- **Film Grain**: Add noise texture
-- **Lens Distortion**: Fisheye or barrel distortion
-- **Pixelate**: Retro pixel effect
-- **Edge Detection**: Artistic outlines
-- **Time Freeze**: Capture frame and overlay
-- **Split Screen**: Multiple simultaneous effects
+-   **Vignette**: Darken edges based on intensity
+-   **Chromatic Aberration**: RGB channel shift
+-   **Film Grain**: Add noise texture
+-   **Lens Distortion**: Fisheye or barrel distortion
+-   **Pixelate**: Retro pixel effect
+-   **Edge Detection**: Artistic outlines
+-   **Time Freeze**: Capture frame and overlay
+-   **Split Screen**: Multiple simultaneous effects
 
 ### Useful OpenCV Functions:
 
@@ -197,28 +199,31 @@ cv2.addWeighted()     # Alpha blend two images
 
 ## 📝 Notes for Teammates
 
-- **Each effect is independent** - no conflicts!
-- **Test individually** - your effect won't break others
-- **Use `intensity`** - maps directly to palm openness
-- **Use `time`** - for animated/oscillating effects
-- **Return BGR format** - OpenCV's default color space
-- **Unique `mode_id`** - increment from the last one
+-   **Each effect is independent** - no conflicts!
+-   **Test individually** - your effect won't break others
+-   **Use `intensity`** - maps directly to palm openness
+-   **Use `time`** - for animated/oscillating effects
+-   **Return BGR format** - OpenCV's default color space
+-   **Unique `mode_id`** - increment from the last one
 
 ## 🐛 Troubleshooting
 
 **Effect not showing up?**
-- Check that it's imported in `effects/__init__.py`
-- Check that it's added to `AVAILABLE_EFFECTS` list
+
+-   Check that it's imported in `effects/__init__.py`
+-   Check that it's added to `AVAILABLE_EFFECTS` list
 
 **Gesture not detecting?**
-- Increase `GESTURE_STABILITY_FRAMES` for more stability
-- Make sure palm is visible and hand is well-lit
-- For menu scrolling, use smooth vertical hand movements
-- For menu selection, point clearly with index finger extended
+
+-   Increase `GESTURE_STABILITY_FRAMES` for more stability
+-   Make sure palm is visible and hand is well-lit
+-   For menu scrolling, use smooth vertical hand movements
+-   For menu selection, point clearly with index finger extended
 
 **Performance issues?**
-- Use `intensity < 0.05` check to skip processing
-- Reduce frame resolution in `main.py`
+
+-   Use `intensity < 0.05` check to skip processing
+-   Reduce frame resolution in `main.py`
 
 ## 📄 License
 

@@ -13,7 +13,7 @@ from effects.rotate_effect import RotateEffect
 from effects.blur_effect import BlurEffect
 from effects.filter_effect import FilterEffect
 from effects.object_3d_effect import Object3DEffect
-from effects.iron_man_effect import IronManEffect
+from effects.ironman_effect import IronManEffect
 
 # List of all available effects
 # Add new effects here to make them available in the app

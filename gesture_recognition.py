@@ -118,14 +118,21 @@ def count_extended_fingers(landmarks):
     """
     fingers_extended = [False] * 5
 
-    # Thumb: check if tip is far from palm in x-direction
+    # Thumb: check if tip is extended both horizontally and vertically
     thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
     thumb_ip = landmarks[mp_hands.HandLandmark.THUMB_IP]
+    thumb_mcp = landmarks[mp_hands.HandLandmark.THUMB_MCP]
     wrist = landmarks[mp_hands.HandLandmark.WRIST]
 
-    thumb_tip_dist = abs(thumb_tip.x - wrist.x)
-    thumb_ip_dist = abs(thumb_ip.x - wrist.x)
-    fingers_extended[0] = thumb_tip_dist > thumb_ip_dist * 1.3
+    # Calculate distance from tip to wrist vs IP to wrist
+    thumb_tip_dist = ((thumb_tip.x - wrist.x)**2 + (thumb_tip.y - wrist.y)**2) ** 0.5
+    thumb_ip_dist = ((thumb_ip.x - wrist.x)**2 + (thumb_ip.y - wrist.y)**2) ** 0.5
+
+    # Also check if thumb is above (lower y value) the MCP joint
+    thumb_is_up = thumb_tip.y < thumb_mcp.y
+
+    # Thumb is extended if tip is farther from wrist than IP joint
+    fingers_extended[0] = (thumb_tip_dist > thumb_ip_dist * 1.2) or thumb_is_up
 
     # Other fingers: tip above PIP joint
     finger_tips = [8, 12, 16, 20]
@@ -221,6 +228,11 @@ def classify_mode_gesture(landmarks, available_effects, gesture_result=None):
     thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
     index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
     ok_dist = ((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2) ** 0.5
+
+    # OPEN PALM (mode_id 5) - All 5 fingers extended (Iron Man)
+    # Check this first to avoid conflicts with other gestures
+    if count == 5 and all(extended):
+        return 5
 
     # OK SIGN (mode_id 4)
     if ok_dist < 0.06 and (extended[2] or extended[3] or extended[4]):
