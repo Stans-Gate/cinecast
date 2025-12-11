@@ -14,6 +14,7 @@ from effects.blur_effect import BlurEffect
 from effects.filter_effect import FilterEffect
 from effects.object_3d_effect import Object3DEffect
 from effects.ironman_effect import IronManEffect
+from effects.absolute_cinema_effect import AbsoluteCinemaEffect
 
 # List of all available effects
 # Add new effects here to make them available in the app
@@ -24,6 +25,7 @@ AVAILABLE_EFFECTS = [
     FilterEffect(),
     Object3DEffect(),
     IronManEffect(),
+    AbsoluteCinemaEffect(),
 ]
 
-__all__ = ['AVAILABLE_EFFECTS', 'ZoomEffect', 'RotateEffect', 'BlurEffect', 'FilterEffect', 'Object3DEffect', 'IronManEffect']
+__all__ = ['AVAILABLE_EFFECTS', 'ZoomEffect', 'RotateEffect', 'BlurEffect', 'FilterEffect', 'Object3DEffect', 'IronManEffect', 'AbsoluteCinemaEffect']

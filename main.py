@@ -28,7 +28,8 @@ from gesture_recognition import (
     detect_menu_select_gesture,
     get_hand_position,
     detect_3d_rotation_gesture,
-    detect_3d_scale_gesture
+    detect_3d_scale_gesture,
+    detect_absolute_cinema_gesture
 )
 from ui_renderer import draw_ui, draw_gesture_guide, draw_mode_menu, draw_vfx_suggestion
 from scene_analyzer import SceneAnalyzer
@@ -105,6 +106,7 @@ SCROLL_COOLDOWN = 0.8  # Minimum seconds between scrolls (increased for slower s
 hand_detected = False
 gesture_buffer = deque(maxlen=GESTURE_STABILITY_FRAMES)
 quit_buffer = deque(maxlen=QUIT_GESTURE_FRAMES)
+absolute_cinema_buffer = deque(maxlen=GESTURE_STABILITY_FRAMES)  # For two-hand gesture
 previous_hand_position = None  # For 3D rotation tracking
 current_gesture_name = None  # Current recognized gesture from MediaPipe
 current_gesture_confidence = 0.0  # Confidence score
@@ -158,7 +160,7 @@ def main():
     global previous_effect, mode_blend_factor
     global last_frame_time, recording
     global hand_detected, mode_locked
-    global gesture_buffer, quit_buffer
+    global gesture_buffer, quit_buffer, absolute_cinema_buffer
     global menu_visible, selected_menu_index, menu_scroll_buffer, menu_select_buffer
     global previous_hand_position, last_scroll_direction
     global current_gesture_name, current_gesture_confidence
@@ -221,6 +223,40 @@ def main():
 
         # Store results for effect application (needed for Iron Man effect)
         current_hand_landmarks = None
+
+        # CHECK FOR TWO-HAND ABSOLUTE CINEMA GESTURE FIRST (when unlocked)
+        if not mode_locked and results.multi_hand_landmarks and len(results.multi_hand_landmarks) >= 2:
+            # Detect absolute cinema gesture (two hands raised with open palms)
+            if detect_absolute_cinema_gesture(results.multi_hand_landmarks):
+                absolute_cinema_buffer.append(True)
+
+                if len(absolute_cinema_buffer) == GESTURE_STABILITY_FRAMES:
+                    if all(absolute_cinema_buffer):
+                        # Lock into Absolute Cinema mode (mode_id 7)
+                        absolute_cinema_effect = None
+                        for effect in AVAILABLE_EFFECTS:
+                            if effect.mode_id == 7:
+                                absolute_cinema_effect = effect
+                                break
+
+                        if absolute_cinema_effect:
+                            mode_locked = True
+                            menu_visible = False
+                            previous_effect = current_effect
+                            current_effect = absolute_cinema_effect
+                            mode_blend_factor = 0.0
+                            gesture_buffer.clear()
+                            quit_buffer.clear()
+                            absolute_cinema_buffer.clear()
+                            menu_scroll_buffer.clear()
+                            menu_select_buffer.clear()
+                            previous_hand_position = None
+                            last_scroll_direction = None
+                            print("[ABSOLUTE CINEMA] Mode activated!")
+            else:
+                absolute_cinema_buffer.append(False)
+        else:
+            absolute_cinema_buffer.clear()
 
         # SINGLE-HAND LOCK/UNLOCK SYSTEM
         if results.multi_hand_landmarks:
@@ -352,6 +388,7 @@ def main():
             hand_detected = False
             gesture_buffer.clear()
             quit_buffer.clear()
+            absolute_cinema_buffer.clear()
             menu_scroll_buffer.clear()
             menu_select_buffer.clear()
             previous_hand_position = None

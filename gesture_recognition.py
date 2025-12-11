@@ -426,9 +426,54 @@ def detect_3d_scale_gesture(landmarks):
     Returns: scale value (1.0 = normal, >1.0 = zoom out, <1.0 = zoom in)
     """
     openness = get_palm_openness(landmarks)
-    
+
     # Map palm openness to scale: closed fist = zoom in (0.5x), open palm = zoom out (1.5x)
     # Inverse mapping: closed (0.0) -> zoom in, open (1.0) -> zoom out
     scale = 0.5 + openness * 1.0  # Range: 0.5 to 1.5
-    
+
     return scale
+
+
+def detect_absolute_cinema_gesture(hand_landmarks_list):
+    """
+    Detect "Absolute Cinema" gesture: two hands raised with open palms
+
+    Args:
+        hand_landmarks_list: List of hand landmarks (from multi_hand_landmarks)
+
+    Returns:
+        True if gesture detected, False otherwise
+    """
+    if not hand_landmarks_list or len(hand_landmarks_list) < 2:
+        return False
+
+    # Check both hands
+    both_hands_raised = True
+    both_palms_open = True
+
+    for hand_landmarks in hand_landmarks_list[:2]:  # Check first two hands
+        landmarks = hand_landmarks.landmark
+
+        # Check if hand is raised (wrist higher than normal)
+        wrist = landmarks[mp_hands.HandLandmark.WRIST]
+        middle_mcp = landmarks[mp_hands.HandLandmark.MIDDLE_FINGER_MCP]
+
+        # Hand is raised if wrist is in upper portion of frame (y < 0.6)
+        # and fingers are pointing upward
+        hand_raised = wrist.y < 0.6 and middle_mcp.y < wrist.y
+
+        if not hand_raised:
+            both_hands_raised = False
+            break
+
+        # Check if palm is open (all or most fingers extended)
+        count, extended = count_extended_fingers(landmarks)
+
+        # Palm is open if at least 4 fingers are extended
+        palm_open = count >= 4
+
+        if not palm_open:
+            both_palms_open = False
+            break
+
+    return both_hands_raised and both_palms_open
